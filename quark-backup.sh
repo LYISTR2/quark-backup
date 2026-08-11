@@ -34,17 +34,17 @@ usage() {
 用法：
   quark-backup.sh                 打开交互菜单
   quark-backup.sh setup           交互设置备份来源、网盘目录和定时计划
-  quark-backup.sh setup --source /path [--source /path2] --remote-dir 服务器备份
+  quark-backup.sh setup --source /path [--source /path2] --remote-dir 服务器备份 --mode direct
   quark-backup.sh login [授权码]  登录/重新授权（无授权码时显示授权入口）
   quark-backup.sh status          查看账号、配置和定时任务状态
-  quark-backup.sh run             立即创建压缩包并上传
+  quark-backup.sh run             立即备份（默认原文件直传，不压缩）
   quark-backup.sh schedule        安装/更新定时任务
   quark-backup.sh disable         关闭定时任务
   quark-backup.sh help            显示帮助
 
 环境变量：
   QUARK_SKILL_DIR                 自定义夸克 Skill 目录
-  QUARK_BACKUP_KEEP_LOCAL         本次运行后保留本地压缩包（1/0）
+  QUARK_BACKUP_KEEP_LOCAL         压缩模式下保留本地压缩包（1/0）
 EOF
 }
 
@@ -88,6 +88,7 @@ load_config() {
   SCHEDULE="daily"
   SCHEDULE_TIME="03:30"
   WEEKDAY="0"
+  BACKUP_MODE="direct"
   KEEP_LOCAL="0"
   LOCAL_DIR="/var/backups/quark-backup"
   ARCHIVE_PREFIX="server-backup"
@@ -100,11 +101,14 @@ try:
     d=json.load(open(p, encoding='utf-8'))
 except Exception as e:
     raise SystemExit(f"配置读取失败: {e}")
+version = int(d.get('version', 1) or 1)
+mode_default = 'archive' if version < 2 else 'direct'
 vals = [
     d.get('remote_dir', 'Hermes备份'),
     d.get('schedule', 'daily'),
     d.get('schedule_time', '03:30'),
     d.get('weekday', '0'),
+    d.get('backup_mode', mode_default),
     d.get('keep_local', '0'),
     d.get('local_dir', '/var/backups/quark-backup'),
     d.get('archive_prefix', 'server-backup'),
@@ -115,31 +119,33 @@ for path in d.get('source_paths', []):
     sys.stdout.write(str(path) + '\0')
 PY
 )
-    ((${#values[@]} >= 7)) || die "配置内容不完整：$CONFIG_FILE"
+    ((${#values[@]} >= 8)) || die "配置内容不完整：$CONFIG_FILE"
     REMOTE_DIR=${values[0]}
     SCHEDULE=${values[1]}
     SCHEDULE_TIME=${values[2]}
     WEEKDAY=${values[3]}
-    KEEP_LOCAL=${values[4]}
-    LOCAL_DIR=${values[5]}
-    ARCHIVE_PREFIX=${values[6]}
+    BACKUP_MODE=${values[4]}
+    KEEP_LOCAL=${values[5]}
+    LOCAL_DIR=${values[6]}
+    ARCHIVE_PREFIX=${values[7]}
     SOURCE_PATHS=()
-    ((${#values[@]} == 7)) || SOURCE_PATHS=("${values[@]:7}")
+    ((${#values[@]} == 8)) || SOURCE_PATHS=("${values[@]:8}")
   fi
 }
 
 save_config() {
   mkdir -p "$CONFIG_DIR"
-  python3 - "$CONFIG_FILE" "$REMOTE_DIR" "$SCHEDULE" "$SCHEDULE_TIME" "$WEEKDAY" "$KEEP_LOCAL" "$LOCAL_DIR" "$ARCHIVE_PREFIX" "${SOURCE_PATHS[@]}" <<'PY'
+  python3 - "$CONFIG_FILE" "$REMOTE_DIR" "$SCHEDULE" "$SCHEDULE_TIME" "$WEEKDAY" "$BACKUP_MODE" "$KEEP_LOCAL" "$LOCAL_DIR" "$ARCHIVE_PREFIX" "${SOURCE_PATHS[@]}" <<'PY'
 import json, os, sys, tempfile
-out, remote, schedule, at, weekday, keep, local_dir, prefix, *sources = sys.argv[1:]
+out, remote, schedule, at, weekday, mode, keep, local_dir, prefix, *sources = sys.argv[1:]
 data = {
-    'version': 1,
+    'version': 2,
     'source_paths': sources,
     'remote_dir': remote,
     'schedule': schedule,
     'schedule_time': at,
     'weekday': weekday,
+    'backup_mode': mode,
     'keep_local': keep,
     'local_dir': local_dir,
     'archive_prefix': prefix,
@@ -287,7 +293,7 @@ validate_sources() {
     case "$p" in
       /proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*) die "不支持备份虚拟系统目录：$p" ;;
     esac
-    if [[ "$LOCAL_DIR" == "$p" || "$LOCAL_DIR" == "$p"/* ]]; then
+    if [[ "$BACKUP_MODE" == "archive" && ( "$LOCAL_DIR" == "$p" || "$LOCAL_DIR" == "$p"/* ) ]]; then
       die "本地压缩包目录不能位于备份来源内部，否则会递归打包：$LOCAL_DIR"
     fi
   done
@@ -306,6 +312,25 @@ create_remote_folder() {
   fi
   fid=$(printf '%s\n' "$out" | json_data_field fid)
   [[ -n "$fid" ]] || die "网盘未返回备份目录标识"
+  printf '%s' "$fid"
+}
+
+create_remote_snapshot_folder() {
+  local parent_fid="$1" stamp host name out code fid msg
+  stamp=$(date '+%Y%m%d-%H%M%S')
+  host=$(hostname -s 2>/dev/null || printf 'host')
+  name="${ARCHIVE_PREFIX}-${host}-${stamp}"
+  set +e
+  out=$(run_cli create-folder --dir-path "$name" --parent-fid "$parent_fid" 2>&1)
+  local rc=$?
+  set -e
+  code=$(printf '%s\n' "$out" | json_result_code)
+  if [[ $rc -ne 0 || "$code" != "0" ]]; then
+    msg=$(printf '%s\n' "$out" | json_result_message)
+    die "创建本次备份目录失败：$msg"
+  fi
+  fid=$(printf '%s\n' "$out" | json_data_field fid)
+  [[ -n "$fid" ]] || die "网盘未返回本次备份目录标识"
   printf '%s' "$fid"
 }
 
@@ -333,17 +358,24 @@ make_archive() {
   CREATED_ARCHIVE="$archive"
 }
 
-upload_archive() {
-  local archive="$1" remote_fid="$2" out code msg path
-  info "正在上传 $(basename "$archive")……"
+upload_paths() {
+  local remote_fid="$1" failure_note="$2"
+  shift 2
+  local -a paths=("$@")
+  local out code msg path
+  if ((${#paths[@]} == 1)); then
+    info "正在上传 $(basename "${paths[0]}")……"
+  else
+    info "正在上传 ${#paths[@]} 个备份来源……"
+  fi
   set +e
-  out=$(run_cli upload "$archive" --parent-fid "$remote_fid" 2>&1)
+  out=$(run_cli upload "${paths[@]}" --parent-fid "$remote_fid" 2>&1)
   local rc=$?
   set -e
   code=$(printf '%s\n' "$out" | json_result_code)
   if [[ $rc -ne 0 || "$code" != "0" ]]; then
     msg=$(printf '%s\n' "$out" | json_result_message)
-    die "上传失败：$msg（本地压缩包已保留：$archive）"
+    die "上传失败：$msg${failure_note:+（$failure_note）}"
   fi
   path=$(printf '%s\n' "$out" | json_data_field fullPath)
   if [[ -n "$path" ]]; then
@@ -360,18 +392,28 @@ run_backup() {
   exec 9>"$LOCK_FILE"
   flock -n 9 || die "已有备份任务正在运行"
   show_user_info >/dev/null || die "夸克账号未授权或授权已过期，请先运行 login"
-  local remote_fid archive keep
+  local remote_fid archive keep backup_fid
   remote_fid=$(create_remote_folder)
-  make_archive
-  archive=$CREATED_ARCHIVE
-  upload_archive "$archive" "$remote_fid"
-  keep="${QUARK_BACKUP_KEEP_LOCAL:-$KEEP_LOCAL}"
-  if [[ "$keep" == "1" ]]; then
-    ok "本地副本已保留：$archive"
-  else
-    rm -f "$archive"
-    ok "本地临时压缩包已清理"
-  fi
+  case "$BACKUP_MODE" in
+    direct)
+      backup_fid=$(create_remote_snapshot_folder "$remote_fid")
+      upload_paths "$backup_fid" "原文件保留在本机" "${SOURCE_PATHS[@]}"
+      ok "原文件已直接上传，未创建压缩包"
+      ;;
+    archive)
+      make_archive
+      archive=$CREATED_ARCHIVE
+      upload_paths "$remote_fid" "本地压缩包已保留：$archive" "$archive"
+      keep="${QUARK_BACKUP_KEEP_LOCAL:-$KEEP_LOCAL}"
+      if [[ "$keep" == "1" ]]; then
+        ok "本地副本已保留：$archive"
+      else
+        rm -f "$archive"
+        ok "本地临时压缩包已清理"
+      fi
+      ;;
+    *) die "不支持的备份模式：$BACKUP_MODE" ;;
+  esac
 }
 
 validate_time() {
@@ -455,8 +497,13 @@ show_status() {
     printf '来源：\n'
     printf '  - %s\n' "${SOURCE_PATHS[@]}"
     printf '网盘目录：/%s\n' "$REMOTE_DIR"
-    printf '本地目录：%s\n' "$LOCAL_DIR"
-    printf '保留本地副本：%s\n' "$([[ "$KEEP_LOCAL" == "1" ]] && printf '是' || printf '否')"
+    if [[ "$BACKUP_MODE" == "direct" ]]; then
+      printf '上传方式：原文件直接上传（不压缩）\n'
+    else
+      printf '上传方式：压缩包上传\n'
+      printf '本地目录：%s\n' "$LOCAL_DIR"
+      printf '保留本地副本：%s\n' "$([[ "$KEEP_LOCAL" == "1" ]] && printf '是' || printf '否')"
+    fi
     if [[ "$SCHEDULE" == "off" ]]; then
       printf '计划：关闭\n'
     else
@@ -499,14 +546,21 @@ setup_interactive() {
     [[ -n "$p" ]] && cleaned+=("$p")
   done
   SOURCE_PATHS=("${cleaned[@]}")
-  validate_sources
   REMOTE_DIR=$(prompt_default "夸克网盘备份文件夹（创建在网盘顶层）" "$REMOTE_DIR")
   [[ "$REMOTE_DIR" != */* ]] || die "备份文件夹请输入单层名称，不要包含 /"
-  LOCAL_DIR=$(prompt_default "本地临时压缩包目录" "$LOCAL_DIR")
-  ARCHIVE_PREFIX=$(prompt_default "压缩包文件名前缀" "$ARCHIVE_PREFIX")
-  local keep_answer
-  keep_answer=$(prompt_default "上传后保留本地副本？(y/N)" "$([[ "$KEEP_LOCAL" == "1" ]] && printf 'y' || printf 'N')")
-  [[ "$keep_answer" =~ ^[Yy]$ ]] && KEEP_LOCAL=1 || KEEP_LOCAL=0
+  BACKUP_MODE=$(prompt_default "上传方式（direct=原文件直传，archive=压缩包）" "$BACKUP_MODE")
+  case "$BACKUP_MODE" in
+    direct) ;;
+    archive)
+      LOCAL_DIR=$(prompt_default "本地临时压缩包目录" "$LOCAL_DIR")
+      ARCHIVE_PREFIX=$(prompt_default "压缩包文件名前缀" "$ARCHIVE_PREFIX")
+      local keep_answer
+      keep_answer=$(prompt_default "上传后保留本地副本？(y/N)" "$([[ "$KEEP_LOCAL" == "1" ]] && printf 'y' || printf 'N')")
+      [[ "$keep_answer" =~ ^[Yy]$ ]] && KEEP_LOCAL=1 || KEEP_LOCAL=0
+      ;;
+    *) die "上传方式只能是 direct 或 archive" ;;
+  esac
+  validate_sources
   local sched
   sched=$(prompt_default "定时频率（daily/weekly/off）" "$SCHEDULE")
   case "$sched" in
@@ -545,6 +599,9 @@ set_config_noninteractive() {
       --remote-dir)
         (($# >= 2)) || die "--remote-dir 缺少名称"
         REMOTE_DIR="$2"; shift 2 ;;
+      --mode)
+        (($# >= 2)) || die "--mode 缺少值"
+        BACKUP_MODE="$2"; shift 2 ;;
       --local-dir)
         (($# >= 2)) || die "--local-dir 缺少路径"
         LOCAL_DIR="$2"; shift 2 ;;
@@ -568,9 +625,10 @@ set_config_noninteractive() {
     esac
   done
   ((${#new_sources[@]} == 0)) || SOURCE_PATHS=("${new_sources[@]}")
-  validate_sources
   [[ "$REMOTE_DIR" != */* ]] || die "备份文件夹请输入单层名称，不要包含 /"
+  [[ "$BACKUP_MODE" == "direct" || "$BACKUP_MODE" == "archive" ]] || die "--mode 只能是 direct 或 archive"
   [[ "$KEEP_LOCAL" == "0" || "$KEEP_LOCAL" == "1" ]] || die "--keep-local 只能是 0 或 1"
+  validate_sources
   case "$SCHEDULE" in
     daily|weekly) validate_time "$SCHEDULE_TIME" || die "时间格式必须为 HH:MM" ;;
     off) ;;

@@ -15,9 +15,10 @@
 
 - 终端交互式授权夸克账号
 - 选择一个或多个本地文件/目录
-- 压缩为 `tar.gz` 后上传到指定夸克网盘文件夹
+- 默认按原文件/原目录结构直接上传，不生成压缩包
+- 需要单文件归档时仍可切换为 `archive` 压缩模式
 - 每日或每周定时备份
-- 上传成功后自动清理本地临时包，或按需保留
+- 压缩模式下，上传成功后自动清理本地临时包，或按需保留
 - 并发锁，避免多个备份任务重叠
 - 配置及授权文件权限收紧为 `600`
 - 无智能体、无 API Key、无常驻服务
@@ -73,9 +74,9 @@ quark-backup setup \
   --source /etc \
   --source /opt/my-app/data \
   --remote-dir 服务器备份 \
+  --mode direct \
   --schedule daily \
   --time 03:30 \
-  --keep-local 0 \
   --install-cron
 
 # 立即备份
@@ -85,6 +86,13 @@ quark-backup run
 quark-backup disable
 ```
 
+### 上传模式
+
+- `direct`：默认模式。每次运行会在目标目录下创建带主机名和时间的子目录，文件按原格式递归上传并保留目录结构，不占用额外本地压缩空间。
+- `archive`：先生成一个 `tar.gz` 再上传，适合希望每次备份只有一个文件的情况。
+
+已有旧配置会继续保持压缩模式；重新运行 `quark-backup setup`，把上传方式选为 `direct` 即可切换为不压缩上传。
+
 ## 文件位置
 
 - 主程序：`/opt/quark-backup/quark-backup.sh`
@@ -92,14 +100,14 @@ quark-backup disable
 - 官方 CLI 私有依赖：`~/.local/share/quark-backup/vendor/quarkclouddrive/`
 - 官方 CLI 运行及授权目录：`~/.local/share/quark-backup/runtime/`
 - 设置：`~/.config/quark-backup/config.json`
-- 默认本地临时包：`/var/backups/quark-backup/`
+- 压缩模式默认本地临时包：`/var/backups/quark-backup/`
 - 定时日志：`/var/log/quark-backup.log`
 
 ## 安全说明
 
 - 仓库不包含夸克账号授权信息、Cookie、Token 或备份内容。
 - 安装时从用户提供的夸克官方地址下载官方 CLI，并检查 ZIP 路径穿越和符号链接。
-- 备份压缩包不是端到端加密文件，其访问安全依赖夸克账号和官方传输通道。
+- 上传内容不是端到端加密文件，其访问安全依赖夸克账号和官方传输通道。
 - 不要直接打包正在写入的 MySQL/PostgreSQL 数据目录作为一致性备份；应先使用数据库原生工具导出快照，再备份快照文件。
 
 ## 测试

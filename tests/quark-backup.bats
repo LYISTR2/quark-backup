@@ -16,15 +16,22 @@ exit 0
 SH
   chmod +x "$QUARK_SKILL_DIR/scripts/install.sh"
   : > "$QUARK_SKILL_DIR/scripts/quark-drive.cjs"
+  export NODE_CALLS="$TEST_ROOT/node-calls.log"
   cat > "$TEST_ROOT/bin/node" <<'SH'
 #!/usr/bin/env bash
 cmd="${2:-}"
+printf '%q ' "$@" >> "${NODE_CALLS:?}"
+printf '\n' >> "$NODE_CALLS"
 case "$cmd" in
   get-user-info)
     printf '%s\n' '{"code":0,"msg":"成功","data":{"vipInfo":{"vipType":"SVIP","used":1024,"capacity":2048},"userInfo":{"nickname":"测试账号"}},"action":"get-user-info","type":"result"}'
     ;;
   create-folder)
-    printf '%s\n' '{"code":0,"msg":"成功","data":{"fid":"remote-folder","full_path":"夸克网盘/测试备份"},"action":"create-folder","type":"result"}'
+    if printf '%s\n' "$@" | grep -Eq -- '(server-backup|nightly backup)-'; then
+      printf '%s\n' '{"code":0,"msg":"成功","data":{"fid":"snapshot-folder","full_path":"夸克网盘/测试备份/snapshot"},"action":"create-folder","type":"result"}'
+    else
+      printf '%s\n' '{"code":0,"msg":"成功","data":{"fid":"remote-folder","full_path":"夸克网盘/测试备份"},"action":"create-folder","type":"result"}'
+    fi
     ;;
   upload)
     printf '%s\n' '{"code":0,"msg":"成功","data":{"fullPath":"夸克网盘/测试备份"},"action":"upload","type":"result"}'
@@ -101,11 +108,64 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"$TEST_ROOT/source with spaces"* ]]
   [[ "$output" == *"测试 备份"* ]]
+  [[ "$output" == *"上传方式：原文件直接上传（不压缩）"* ]]
   [[ "$output" == *"weekly 02:15（星期 3）"* ]]
+  run "$APP" run
+  [ "$status" -eq 0 ]
+  upload_line=$(grep 'quark-drive.cjs upload' "$NODE_CALLS")
+  [[ "$upload_line" == *"$TEST_ROOT/source\\ with\\ spaces"* || "$upload_line" == *"$TEST_ROOT/source with spaces"* ]]
+  [[ "$upload_line" == *"--parent-fid snapshot-folder"* ]]
+}
+
+@test "legacy version-one config keeps archive mode" {
+  mkdir -p "$XDG_CONFIG_HOME/quark-backup"
+  cat > "$XDG_CONFIG_HOME/quark-backup/config.json" <<JSON
+{
+  "version": 1,
+  "source_paths": ["$TEST_ROOT/source"],
+  "remote_dir": "测试备份",
+  "schedule": "off",
+  "schedule_time": "03:30",
+  "weekday": "0",
+  "keep_local": "1",
+  "local_dir": "$TEST_ROOT/local",
+  "archive_prefix": "legacy"
+}
+JSON
+  run "$APP" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"上传方式：压缩包上传"* ]]
+}
+
+@test "direct mode uploads source paths without creating an archive" {
+  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir 测试备份 --mode direct --schedule off
+  [ "$status" -eq 0 ]
+  run "$APP" run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"原文件已直接上传"* ]]
+  create_calls=$(grep -c 'quark-drive.cjs create-folder' "$NODE_CALLS")
+  [ "$create_calls" -eq 2 ]
+  upload_line=$(grep 'quark-drive.cjs upload' "$NODE_CALLS")
+  [[ "$upload_line" == *"$TEST_ROOT/source"* ]]
+  [[ "$upload_line" == *"--parent-fid snapshot-folder"* ]]
+  [[ "$upload_line" != *".tar.gz"* ]]
+  [ ! -d /var/backups/quark-backup ] || ! compgen -G '/var/backups/quark-backup/*.tar.gz' >/dev/null
+}
+
+@test "direct mode accepts multiple source paths" {
+  mkdir -p "$TEST_ROOT/second"
+  printf second > "$TEST_ROOT/second/file.txt"
+  run "$APP" setup --source "$TEST_ROOT/source" --source "$TEST_ROOT/second" --remote-dir 测试备份 --mode direct --schedule off
+  [ "$status" -eq 0 ]
+  run "$APP" run
+  [ "$status" -eq 0 ]
+  upload_line=$(grep 'quark-drive.cjs upload' "$NODE_CALLS")
+  [[ "$upload_line" == *"$TEST_ROOT/source"* ]]
+  [[ "$upload_line" == *"$TEST_ROOT/second"* ]]
 }
 
 @test "backup creates archive, uploads it, and keeps local copy" {
-  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir 测试备份 --local-dir "$TEST_ROOT/local" --prefix smoke --schedule off --keep-local 1
+  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir 测试备份 --mode archive --local-dir "$TEST_ROOT/local" --prefix smoke --schedule off --keep-local 1
   [ "$status" -eq 0 ]
   run "$APP" run
   [ "$status" -eq 0 ]
@@ -119,7 +179,7 @@ SH
 }
 
 @test "backup removes local copy when keep-local is zero" {
-  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir 测试备份 --local-dir "$TEST_ROOT/local" --prefix cleanup --schedule off --keep-local 0
+  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir 测试备份 --mode archive --local-dir "$TEST_ROOT/local" --prefix cleanup --schedule off --keep-local 0
   [ "$status" -eq 0 ]
   run "$APP" run
   [ "$status" -eq 0 ]
@@ -135,7 +195,7 @@ SH
 }
 
 @test "setup rejects local archive directory inside source" {
-  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir bad --local-dir "$TEST_ROOT/source/backups" --schedule off --keep-local 0
+  run "$APP" setup --source "$TEST_ROOT/source" --remote-dir bad --mode archive --local-dir "$TEST_ROOT/source/backups" --schedule off --keep-local 0
   [ "$status" -ne 0 ]
   [[ "$output" == *"递归打包"* ]]
 }
