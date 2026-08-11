@@ -27,7 +27,7 @@
 在另一台 Debian/Ubuntu 服务器上以 root 执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LYISTR2/quark-backup/main/install.sh | bash
+curl -fsSL https://github.com/LYISTR2/quark-backup/raw/refs/heads/main/install.sh | bash
 ```
 
 如果希望先审查再执行：
