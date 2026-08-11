@@ -47,6 +47,50 @@ SH
   [[ "$output" == *"一键交互式备份工具"* ]]
 }
 
+@test "installer supports curl pipe execution without BASH_SOURCE" {
+  mkdir -p "$TEST_ROOT/installer-bin" "$TEST_ROOT/installer-skill/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/install.sh"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/uninstall.sh"
+  chmod +x "$TEST_ROOT/installer-skill/scripts/install.sh" "$TEST_ROOT/installer-skill/scripts/uninstall.sh"
+  : > "$TEST_ROOT/installer-skill/SKILL.md"
+
+  cat > "$TEST_ROOT/installer-bin/apt-get" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  cat > "$TEST_ROOT/installer-bin/curl" <<SH
+#!/usr/bin/env bash
+set -e
+out=""
+url=""
+while ((\$#)); do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    http*) url="\$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "\$url" in
+  */quark-backup.sh) cp "$APP" "\$out" ;;
+  */README.md) printf '# test\n' > "\$out" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$TEST_ROOT/installer-bin/apt-get" "$TEST_ROOT/installer-bin/curl"
+
+  run env \
+    PATH="$TEST_ROOT/installer-bin:$PATH" \
+    QUARK_BACKUP_INSTALL_DIR="$TEST_ROOT/installed" \
+    QUARK_BACKUP_HOME="$TEST_ROOT/installer-data" \
+    QUARK_SKILL_DIR="$TEST_ROOT/installer-skill" \
+    QUARK_BACKUP_LINK="$TEST_ROOT/installer-bin/quark-backup" \
+    bash < /opt/quark-backup/install.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"BASH_SOURCE"* ]]
+  [ -x "$TEST_ROOT/installed/quark-backup.sh" ]
+  [ -L "$TEST_ROOT/installer-bin/quark-backup" ]
+}
+
 @test "noninteractive setup writes private JSON and round-trips spaces" {
   mkdir -p "$TEST_ROOT/source with spaces"
   printf x > "$TEST_ROOT/source with spaces/a"

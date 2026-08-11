@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 APP_DIR="${QUARK_BACKUP_INSTALL_DIR:-/opt/quark-backup}"
 SCRIPT="$APP_DIR/quark-backup.sh"
-LINK="/usr/local/bin/quark-backup"
-RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/b71faa28a0ea8666e891c8e6151f15148e2d6ab6}"
+LINK="${QUARK_BACKUP_LINK:-/usr/local/bin/quark-backup}"
+RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/main}"
 SKILL_URL="https://pdds.quark.cn/download/stfile/ssyytvtxsstwsu8uo/quarkclouddrive-1.0.11.zip"
 REAL_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
 REAL_HOME="${REAL_HOME:-$HOME}"
@@ -21,8 +24,12 @@ info "安装依赖……"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs curl unzip python3 tar cron util-linux
 
-source_script="$SOURCE_DIR/quark-backup.sh"
-source_readme="$SOURCE_DIR/README.md"
+source_script=""
+source_readme=""
+if [[ -n "$SOURCE_DIR" ]]; then
+  source_script="$SOURCE_DIR/quark-backup.sh"
+  source_readme="$SOURCE_DIR/README.md"
+fi
 download_tmp=""
 if [[ ! -f "$source_script" || ! -f "$source_readme" ]]; then
   info "下载备份工具……"
