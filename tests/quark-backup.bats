@@ -64,6 +64,18 @@ SH
   [[ "$output" != *"SyntaxError"* ]]
 }
 
+@test "commands continue with an installed CLI when vendor update check is offline" {
+  cat > "$QUARK_SKILL_DIR/scripts/install.sh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+  chmod +x "$QUARK_SKILL_DIR/scripts/install.sh"
+  run "$APP" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"账号：测试账号"* ]]
+  [[ "$output" == *"更新检查失败"* ]]
+}
+
 @test "installer supports curl pipe execution without BASH_SOURCE" {
   mkdir -p "$TEST_ROOT/installer-bin" "$TEST_ROOT/installer-skill/scripts"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/install.sh"

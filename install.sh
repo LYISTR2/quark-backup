@@ -8,7 +8,7 @@ fi
 APP_DIR="${QUARK_BACKUP_INSTALL_DIR:-/opt/quark-backup}"
 SCRIPT="$APP_DIR/quark-backup.sh"
 LINK="${QUARK_BACKUP_LINK:-/usr/local/bin/quark-backup}"
-RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.2}"
+RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.3}"
 SKILL_URL="https://pdds.quark.cn/download/stfile/ssyytvtxsstwsu8uo/quarkclouddrive-1.0.11.zip"
 REAL_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
 REAL_HOME="${REAL_HOME:-$HOME}"

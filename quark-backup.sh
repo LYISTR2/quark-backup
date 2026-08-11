@@ -60,7 +60,9 @@ ensure_environment() {
   require_command flock
   [[ -f "$CLI" ]] || die "未找到夸克网盘 Skill：$CLI"
   [[ -f "$INSTALLER" ]] || die "Skill 安装检查脚本不存在：$INSTALLER"
-  bash "$INSTALLER" >/dev/null || die "夸克网盘 Skill 环境检查失败"
+  if ! bash "$INSTALLER" >/dev/null; then
+    warn "夸克网盘 Skill 更新检查失败，继续使用已安装的 CLI"
+  fi
 }
 
 new_session_id() {
