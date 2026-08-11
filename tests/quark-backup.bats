@@ -76,12 +76,13 @@ SH
   [[ "$output" == *"更新检查失败"* ]]
 }
 
-@test "installer supports curl pipe execution without BASH_SOURCE" {
+@test "installer supports curl pipe execution and an offline vendor update check" {
   mkdir -p "$TEST_ROOT/installer-bin" "$TEST_ROOT/installer-skill/scripts"
-  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/install.sh"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 1' > "$TEST_ROOT/installer-skill/scripts/install.sh"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/uninstall.sh"
   chmod +x "$TEST_ROOT/installer-skill/scripts/install.sh" "$TEST_ROOT/installer-skill/scripts/uninstall.sh"
   : > "$TEST_ROOT/installer-skill/SKILL.md"
+  : > "$TEST_ROOT/installer-skill/scripts/quark-drive.cjs"
 
   cat > "$TEST_ROOT/installer-bin/apt-get" <<'SH'
 #!/usr/bin/env bash
@@ -118,6 +119,17 @@ SH
   [[ "$output" != *"BASH_SOURCE"* ]]
   [ -x "$TEST_ROOT/installed/quark-backup.sh" ]
   [ -L "$TEST_ROOT/installer-bin/quark-backup" ]
+}
+
+@test "login tightens vendor and runtime authorization config permissions" {
+  mkdir -p "$QUARK_SKILL_DIR/hermes" "$QUARK_RUNTIME_DIR/hermes"
+  : > "$QUARK_SKILL_DIR/hermes/config.json"
+  : > "$QUARK_RUNTIME_DIR/hermes/config.json"
+  chmod 644 "$QUARK_SKILL_DIR/hermes/config.json" "$QUARK_RUNTIME_DIR/hermes/config.json"
+  run "$APP" login test-authorization-code
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$QUARK_SKILL_DIR/hermes/config.json")" = "600" ]
+  [ "$(stat -c %a "$QUARK_RUNTIME_DIR/hermes/config.json")" = "600" ]
 }
 
 @test "noninteractive setup writes private JSON and round-trips spaces" {

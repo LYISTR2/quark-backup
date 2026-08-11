@@ -279,8 +279,10 @@ else:
   set -e
   code=$(printf '%s\n' "$out" | json_result_code)
   if [[ $rc -eq 0 && "$code" == "0" ]]; then
-    local auth_config="$RUNTIME_DIR/hermes/config.json"
-    [[ -f "$auth_config" ]] && chmod 600 "$auth_config"
+    local auth_config
+    while IFS= read -r -d '' auth_config; do
+      chmod 600 "$auth_config"
+    done < <(find "$RUNTIME_DIR" "$SKILL_DIR" -maxdepth 3 -type f -name config.json -print0 2>/dev/null)
     ok "夸克网盘授权成功"
     show_user_info || true
     return 0
