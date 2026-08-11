@@ -231,9 +231,11 @@ def fmt(n):
     for unit in units:
         if x<1024 or unit==units[-1]: return f"{x:.2f} {unit}"
         x/=1024
-print(f"账号：{u.get(chr(110)+chr(105)+chr(99)+chr(107)+chr(110)+chr(97)+chr(109)+chr(101), "未知")}")
-print(f"会员：{v.get(chr(118)+chr(105)+chr(112)+chr(84)+chr(121)+chr(112)+chr(101), "未知")}")
-if cap: print(f"空间：{fmt(used)} / {fmt(cap)}")'
+nickname_key="nickname"
+vip_type_key="vipType"
+print("账号：{}".format(u.get(nickname_key, "未知")))
+print("会员：{}".format(v.get(vip_type_key, "未知")))
+if cap: print("空间：{} / {}".format(fmt(used), fmt(cap)))'
 }
 
 login() {

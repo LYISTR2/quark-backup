@@ -54,6 +54,16 @@ SH
   [[ "$output" == *"一键交互式备份工具"* ]]
 }
 
+@test "status renders account information on Python 3.11" {
+  mkdir -p "$TEST_ROOT/python311-bin"
+  ln -s /usr/bin/python3.11 "$TEST_ROOT/python311-bin/python3"
+  run env PATH="$TEST_ROOT/python311-bin:$PATH" "$APP" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"账号：测试账号"* ]]
+  [[ "$output" == *"会员：SVIP"* ]]
+  [[ "$output" != *"SyntaxError"* ]]
+}
+
 @test "installer supports curl pipe execution without BASH_SOURCE" {
   mkdir -p "$TEST_ROOT/installer-bin" "$TEST_ROOT/installer-skill/scripts"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/installer-skill/scripts/install.sh"
