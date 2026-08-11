@@ -24,7 +24,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs curl unzip python3 tar 
 source_script="$SOURCE_DIR/quark-backup.sh"
 source_readme="$SOURCE_DIR/README.md"
 download_tmp=""
-if [[ ! -f "$source_script" ]]; then
+if [[ ! -f "$source_script" || ! -f "$source_readme" ]]; then
   info "下载备份工具……"
   download_tmp=$(mktemp -d)
   trap '[[ -z "${download_tmp:-}" ]] || rm -rf "$download_tmp"' EXIT
