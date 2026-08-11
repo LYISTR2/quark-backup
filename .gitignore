@@ -1,0 +1,9 @@
+# Runtime credentials and state
+.standalone-auth/
+runtime/
+*.log
+*.tar.gz
+
+# Editor / OS
+.DS_Store
+*.swp
