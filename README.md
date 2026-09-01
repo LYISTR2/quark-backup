@@ -2,6 +2,8 @@
 
 基于夸克官方 `quarkclouddrive` CLI 的 Linux 服务器备份封装。它不重新实现夸克协议，只调用官方 CLI 完成账号授权、目录创建和断点续传上传。
 
+安装器会先查询夸克官方 `skill_config` 获取当前最新版 Skill；只有官方版本接口临时不可用时，才回退到内置的 `1.0.15` 安装包。安装完成后，每次运行命令前仍会调用官方 `install.sh` 检查更新，因此官方 CLI 可以继续跟随夸克后续版本升级。
+
 > **目标机器不需要安装 Hermes、OpenClaw 或任何 AI 智能体。** 安装器会把官方 CLI 作为私有运行依赖安装到当前用户目录；脚本只设置官方 CLI 所需的 Hermes 兼容渠道标识，不会安装、启动或调用 Hermes Agent。
 
 ## 支持环境
@@ -28,7 +30,7 @@
 在另一台 Debian/Ubuntu 服务器上以 root 执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.5/install.sh | bash
 ```
 
 如果希望先审查再执行：
@@ -107,6 +109,7 @@ quark-backup disable
 
 - 仓库不包含夸克账号授权信息、Cookie、Token 或备份内容。
 - 安装时从用户提供的夸克官方地址下载官方 CLI，并检查 ZIP 路径穿越和符号链接。
+- 初次安装优先从夸克官方版本接口解析最新 Skill 下载地址，内置 `1.0.15` 仅作为离线回退入口。
 - 上传内容不是端到端加密文件，其访问安全依赖夸克账号和官方传输通道。
 - 不要直接打包正在写入的 MySQL/PostgreSQL 数据目录作为一致性备份；应先使用数据库原生工具导出快照，再备份快照文件。
 

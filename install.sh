@@ -8,14 +8,42 @@ fi
 APP_DIR="${QUARK_BACKUP_INSTALL_DIR:-/opt/quark-backup}"
 SCRIPT="$APP_DIR/quark-backup.sh"
 LINK="${QUARK_BACKUP_LINK:-/usr/local/bin/quark-backup}"
-RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.4}"
-SKILL_URL="https://pdds.quark.cn/download/stfile/ssyytvtxsstwsu8uo/quarkclouddrive-1.0.11.zip"
+RAW_BASE="${QUARK_BACKUP_RAW_BASE:-https://raw.githubusercontent.com/LYISTR2/quark-backup/v1.1.5}"
+SKILL_CONFIG_URL="${QUARK_SKILL_CONFIG_URL:-https://open-api-drive.quark.cn/agent/v1/skill_config}"
+SKILL_FALLBACK_URL="${QUARK_SKILL_URL:-https://pdds.quark.cn/download/stfile/bbhhdeegcbcfbdjdp/quarkclouddrive-1.0.15.zip}"
 REAL_HOME="${SUDO_USER:+$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)}"
 REAL_HOME="${REAL_HOME:-$HOME}"
 SKILL_DIR="${QUARK_SKILL_DIR:-${QUARK_BACKUP_HOME:-$REAL_HOME/.local/share/quark-backup}/vendor/quarkclouddrive}"
 
 info() { printf '[信息] %s\n' "$*"; }
+warn() { printf '[注意] %s\n' "$*" >&2; }
 die() { printf '[错误] %s\n' "$*" >&2; exit 1; }
+
+resolve_skill_url() {
+  local req_id response resolved
+  req_id="$(date +%s)-$RANDOM"
+  if response=$(curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+      --connect-timeout 20 --max-time 60 "${SKILL_CONFIG_URL}?req_id=${req_id}"); then
+    resolved=$(python3 - "$response" <<'PY'
+import json, sys
+try:
+    payload = json.loads(sys.argv[1])
+    config = payload.get('data', {}).get('config', {})
+    url = str(config.get('qkPan') or '').strip()
+except Exception:
+    url = ''
+if url.startswith('https://'):
+    print(url)
+PY
+)
+    if [[ -n "$resolved" ]]; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  fi
+  warn "无法获取夸克官方最新版地址，使用内置的 1.0.15 安装包"
+  printf '%s' "$SKILL_FALLBACK_URL"
+}
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die "请使用 root 运行"
 command -v apt-get >/dev/null 2>&1 || die "当前安装器仅支持 Debian/Ubuntu"
@@ -54,9 +82,10 @@ install -d -m 0700 "${QUARK_BACKUP_HOME:-$REAL_HOME/.local/share/quark-backup}"
 
 if [[ ! -f "$SKILL_DIR/SKILL.md" ]]; then
   info "安装夸克网盘 Skill……"
+  skill_url=$(resolve_skill_url)
   skill_tmp=$(mktemp -d)
   trap '[[ -z "${download_tmp:-}" ]] || rm -rf "$download_tmp"; [[ -z "${skill_tmp:-}" ]] || rm -rf "$skill_tmp"' EXIT
-  curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 120 -o "$skill_tmp/skill.zip" "$SKILL_URL"
+  curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 120 -o "$skill_tmp/skill.zip" "$skill_url"
   python3 - "$skill_tmp/skill.zip" "$SKILL_DIR" <<'PY'
 import os, stat, sys, zipfile
 archive, out = sys.argv[1:]

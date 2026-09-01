@@ -121,6 +121,60 @@ SH
   [ -L "$TEST_ROOT/installer-bin/quark-backup" ]
 }
 
+@test "installer resolves the current vendor skill URL before downloading" {
+  mkdir -p "$TEST_ROOT/installer-bin" "$TEST_ROOT/current-skill/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/current-skill/scripts/install.sh"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$TEST_ROOT/current-skill/scripts/uninstall.sh"
+  chmod +x "$TEST_ROOT/current-skill/scripts/install.sh" "$TEST_ROOT/current-skill/scripts/uninstall.sh"
+  : > "$TEST_ROOT/current-skill/SKILL.md"
+  : > "$TEST_ROOT/current-skill/scripts/quark-drive.cjs"
+  python3 - "$TEST_ROOT/current-skill" "$TEST_ROOT/current-skill.zip" <<'PY'
+import os, sys, zipfile
+source, archive = sys.argv[1:]
+with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as out:
+    for root, _, files in os.walk(source):
+        for name in files:
+            path = os.path.join(root, name)
+            out.write(path, os.path.relpath(path, source))
+PY
+
+  cat > "$TEST_ROOT/installer-bin/apt-get" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  cat > "$TEST_ROOT/installer-bin/curl" <<SH
+#!/usr/bin/env bash
+set -e
+out=""
+url=""
+while ((\$#)); do
+  case "\$1" in
+    -o) out="\$2"; shift 2 ;;
+    http*) url="\$1"; shift ;;
+    *) shift ;;
+  esac
+done
+case "\$url" in
+  */quark-backup.sh) cp "$APP" "\$out" ;;
+  */README.md) printf '# test\n' > "\$out" ;;
+  *skill_config*) printf '%s\n' '{"data":{"config":{"qkPanVersion":"9.9.9","qkPan":"https://vendor.example/current.zip"}}}' ;;
+  https://vendor.example/current.zip) cp "$TEST_ROOT/current-skill.zip" "\$out" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$TEST_ROOT/installer-bin/apt-get" "$TEST_ROOT/installer-bin/curl"
+
+  run env \
+    PATH="$TEST_ROOT/installer-bin:$PATH" \
+    QUARK_BACKUP_INSTALL_DIR="$TEST_ROOT/installed-current" \
+    QUARK_BACKUP_HOME="$TEST_ROOT/installer-current-data" \
+    QUARK_SKILL_DIR="$TEST_ROOT/installer-current-skill" \
+    QUARK_BACKUP_LINK="$TEST_ROOT/installer-bin/quark-backup-current" \
+    bash < /opt/quark-backup/install.sh
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_ROOT/installer-current-skill/SKILL.md" ]
+}
+
 @test "login tightens vendor and runtime authorization config permissions" {
   mkdir -p "$QUARK_SKILL_DIR/hermes" "$QUARK_RUNTIME_DIR/hermes"
   : > "$QUARK_SKILL_DIR/hermes/config.json"
